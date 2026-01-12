@@ -53,6 +53,8 @@ public:
 	 */
 	static BitmapRef Create(int width, int height, const Color& color);
 
+	static BitmapRef Create(int width, int height, const Color& color, const DynamicFormat& format);
+
 	/**
 	 * Loads a bitmap from a stream.
 	 *
@@ -91,6 +93,8 @@ public:
 	 */
 	static BitmapRef Create(int width, int height, bool transparent = true, int bpp = 0);
 
+	static BitmapRef CreateImage(int width, int height, bool transparent = true);
+
 	/**
 	 * Creates a surface wrapper around existing pixel data.
 	 *
@@ -103,6 +107,7 @@ public:
 	static BitmapRef Create(void *pixels, int width, int height, int pitch, const DynamicFormat& format);
 
 	Bitmap(int width, int height, bool transparent);
+	Bitmap(int width, int height, bool transparent, const DynamicFormat& format);
 	Bitmap(Filesystem_Stream::InputStream stream, bool transparent, uint32_t flags);
 	Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t flags);
 	Bitmap(Bitmap const& source, Rect const& src_rect, bool transparent);
@@ -661,6 +666,11 @@ protected:
 	 */
 	pixman_op_t GetOperator(pixman_image_t* mask = nullptr, BlendMode blend_mode = BlendMode::Default) const;
 	bool read_only = false;
+
+	template <typename pixel_t>
+	void ToneBlitImpl(int x, int y, pixel_t* pixels, Rect const& src_rect, const Tone& tone, const Bitmap& src);
+
+	static std::map<pixman_format_code_t, std::string_view> format_repr;
 };
 
 struct ImageOut {

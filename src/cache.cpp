@@ -1,5 +1,4 @@
-/*
- * This file is part of EasyRPG Player.
+/* * This file is part of EasyRPG Player.
  *
  * EasyRPG Player is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -495,7 +494,7 @@ BitmapRef Cache::SpriteEffect(const BitmapRef& src_bitmap, const Rect& rect, boo
 		BitmapRef bitmap_effects;
 
 		auto create = [&rect] () -> BitmapRef {
-			return Bitmap::Create(rect.width, rect.height, true);
+			return Bitmap::Create(rect.width, rect.height, Color(), Bitmap::image_format);
 		};
 
 		if (tone != Tone()) {

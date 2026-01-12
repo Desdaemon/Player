@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "game_config.h"
+#include "pixel_format.h"
 #include "system.h"
 #include "sdl2_ui.h"
 
@@ -109,6 +110,10 @@ static DynamicFormat GetDynamicFormat(uint32_t fmt) {
 			return format_A8R8G8B8_n().format();
 		case SDL_PIXELFORMAT_ABGR32:
 			return format_A8B8G8R8_n().format();
+		case SDL_PIXELFORMAT_RGB565:
+			return format_R5G6B5().format();
+		case SDL_PIXELFORMAT_ABGR1555:
+			return format_R5G5B5A1_n().format();
 		default:
 			return DynamicFormat();
 	}
@@ -251,7 +256,7 @@ bool Sdl2Ui::vChangeDisplaySurfaceResolution(int new_width, int new_height) {
 
 	sdl_texture_game = new_sdl_texture_game;
 
-	BitmapRef new_main_surface = Bitmap::Create(new_width, new_height, Color(0, 0, 0, 255));
+	BitmapRef new_main_surface = Bitmap::Create(new_width, new_height, Color(0, 0, 0, 255), format_R5G6B5().format());
 
 	if (!new_main_surface) {
 		Output::Warning("ChangeDisplaySurfaceResolution Bitmap::Create failed");
@@ -278,7 +283,7 @@ void Sdl2Ui::RequestVideoMode(int width, int height, int zoom, bool fullscreen, 
 	// anymore. The library takes care of it now.
 	current_display_mode.width = width;
 	current_display_mode.height = height;
-	current_display_mode.bpp = 32;
+	current_display_mode.bpp = vcfg.compat16.Get() ? 16 : 32;
 	current_display_mode.zoom = zoom;
 	current_display_mode.vsync = vsync;
 
@@ -407,7 +412,7 @@ bool Sdl2Ui::RefreshDisplayMode() {
 					!!(rinfo.flags & SDL_RENDERER_SOFTWARE),
 					!!(rinfo.flags & SDL_RENDERER_PRESENTVSYNC)
 					);
-			texture_format = SelectFormat(rinfo, false);
+			texture_format = SDL_PIXELFORMAT_ABGR1555; // SelectFormat(rinfo, false);
 		} else {
 			Output::Debug("SDL_GetRendererInfo failed : {}", SDL_GetError());
 		}
@@ -608,6 +613,12 @@ void Sdl2Ui::UpdateDisplay() {
 #else
 	// SDL_UpdateTexture was found to be faster than SDL_LockTexture / SDL_UnlockTexture.
 	SDL_UpdateTexture(sdl_texture_game, nullptr, main_surface->pixels(), main_surface->pitch());
+	// void* target_pixels;
+	// int target_pitch;
+	// SDL_LockTexture(sdl_texture_game, nullptr, &target_pixels, &target_pitch);
+	// SDL_ConvertPixels(main_surface->width(), main_surface->height(), SDL_PIXELFORMAT_BGR565, main_surface->pixels(),
+	// 	main_surface->pitch(), texture_format, target_pixels, target_pitch);
+	// SDL_UnlockTexture(sdl_texture_game);
 #endif
 
 #ifndef __PS4__

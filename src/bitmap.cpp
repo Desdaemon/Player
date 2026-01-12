@@ -21,8 +21,12 @@
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+#include <map>
 #include <unordered_map>
 
+#include "keys.h"
+#include "opacity.h"
+#include "pixel_format.h"
 #include "utils.h"
 #include "cache.h"
 #include "bitmap.h"
@@ -42,6 +46,12 @@
 
 BitmapRef Bitmap::Create(int width, int height, const Color& color) {
 	BitmapRef surface = Bitmap::Create(width, height, true);
+	surface->Fill(color);
+	return surface;
+}
+
+BitmapRef Bitmap::Create(int width, int height, const Color& color, const DynamicFormat& format) {
+	BitmapRef surface = std::make_shared<Bitmap>(width, height, true, format);
 	surface->Fill(color);
 	return surface;
 }
@@ -74,12 +84,25 @@ BitmapRef Bitmap::Create(int width, int height, bool transparent, int /* bpp */)
 	return std::make_shared<Bitmap>(width, height, transparent);
 }
 
+BitmapRef Bitmap::CreateImage(int width, int height, bool transparent) {
+	DynamicFormat format;
+	format = transparent ? image_format : opaque_image_format;
+	return std::make_shared<Bitmap>(width, height, transparent, format);
+}
+
 BitmapRef Bitmap::Create(void *pixels, int width, int height, int pitch, const DynamicFormat& format) {
 	return std::make_shared<Bitmap>(pixels, width, height, pitch, format);
 }
 
 Bitmap::Bitmap(int width, int height, bool transparent) {
 	format = (transparent ? pixel_format : opaque_pixel_format);
+	pixman_format = find_format(format);
+	Init(width, height, (void *) NULL);
+}
+
+Bitmap::Bitmap(int width, int height, bool transparent, const DynamicFormat& _format) : format(_format) {
+	if (!transparent)
+		format.alpha_type = PF::NoAlpha;
 	pixman_format = find_format(format);
 	Init(width, height, (void *) NULL);
 }
@@ -91,7 +114,7 @@ Bitmap::Bitmap(void *pixels, int width, int height, int pitch, const DynamicForm
 }
 
 Bitmap::Bitmap(Filesystem_Stream::InputStream stream, bool transparent, uint32_t flags) {
-	format = (transparent ? pixel_format : opaque_pixel_format);
+	format = (transparent ? image_format : opaque_image_format);
 	pixman_format = find_format(format);
 
 	if (!stream) {
@@ -133,7 +156,7 @@ Bitmap::Bitmap(Filesystem_Stream::InputStream stream, bool transparent, uint32_t
 }
 
 Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t flags) {
-	format = (transparent ? pixel_format : opaque_pixel_format);
+	format = (transparent ? image_format : opaque_image_format);
 	pixman_format = find_format(format);
 
 	ImageOut image_out;
@@ -164,8 +187,9 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
 }
 
 Bitmap::Bitmap(Bitmap const& source, Rect const& src_rect, bool transparent) {
-	format = (transparent ? pixel_format : opaque_pixel_format);
+	format = source.format;
 	pixman_format = find_format(format);
+	image_opacity = source.image_opacity;
 
 	Init(src_rect.width, src_rect.height, (void *) NULL);
 
@@ -208,6 +232,8 @@ ImageOpacity Bitmap::ComputeImageOpacity() const {
 	bool all_transp = true;
 	bool alpha_1bit = true;
 
+	// assert(format.bits == 32);
+	if (format.bits == 32) {
 	auto* p = reinterpret_cast<const uint32_t*>(pixels());
 	const auto mask = format.rgba_to_uint32_t(0, 0, 0, 0xFF);
 
@@ -226,6 +252,33 @@ ImageOpacity Bitmap::ComputeImageOpacity() const {
 		all_opaque ? ImageOpacity::Opaque :
 		alpha_1bit ? ImageOpacity::Alpha_1Bit :
 		ImageOpacity::Alpha_8Bit;
+	} else if (format.bits == 16) {
+		// auto* p = reinterpret_cast<const uint16_t*>(pixels());
+		// const auto mask = format.rgba_to_uint32_t(0, 0, 0, 0xFF);
+
+		// int n = GetSize() / sizeof(uint16_t);
+
+		auto* p = reinterpret_cast<const uint16_t*>(pixels());
+		const auto mask = format.rgba_to_uint32_t(0, 0, 0, 0xFF);
+
+		int n = GetSize() / sizeof(uint16_t);
+		for (int i = 0; i < n; ++i ) {
+			auto px = p[i] & mask;
+			bool transp = (px == 0);
+			bool opaque = (px == mask);
+			all_transp &= transp;
+			all_opaque &= opaque;
+			alpha_1bit &= (transp | opaque);
+		}
+
+		return
+			all_transp ? ImageOpacity::Transparent :
+			all_opaque ? ImageOpacity::Opaque :
+			alpha_1bit ? ImageOpacity::Alpha_1Bit :
+			ImageOpacity::Alpha_8Bit;
+	} else {
+		assert(false);
+	}
 }
 
 ImageOpacity Bitmap::ComputeImageOpacity(Rect rect) const {
@@ -239,6 +292,9 @@ ImageOpacity Bitmap::ComputeImageOpacity(Rect rect) const {
 
 	const auto full_rect = GetRect();
 	rect = full_rect.GetSubRect(rect);
+
+	// assert(format.bits == 32);
+	if (format.bits == 32) {
 
 	auto* p = reinterpret_cast<const uint32_t*>(pixels());
 	const int stride = pitch() / sizeof(uint32_t);
@@ -262,6 +318,33 @@ ImageOpacity Bitmap::ComputeImageOpacity(Rect rect) const {
 		all_opaque ? ImageOpacity::Opaque :
 		alpha_1bit ? ImageOpacity::Alpha_1Bit :
 		ImageOpacity::Alpha_8Bit;
+	} else if (format.bits == 16) {
+
+	auto* p = reinterpret_cast<const uint16_t*>(pixels());
+	const int stride = pitch() / sizeof(uint16_t);
+	const auto mask = format.rgba_to_uint32_t(0, 0, 0, 0xFF);
+
+	int xend = (rect.x + rect.width);
+	int yend = (rect.y + rect.height);
+	for (int y = rect.y * stride; y < yend * stride; y += stride) {
+		for (int x = rect.x; x < xend; ++x) {
+			auto px = p[x + y] & mask;
+			bool transp = (px == 0);
+			bool opaque = (px == mask);
+			all_transp &= transp;
+			all_opaque &= opaque;
+			alpha_1bit &= (transp | opaque);
+		}
+	}
+
+	return
+		all_transp ? ImageOpacity::Transparent :
+		all_opaque ? ImageOpacity::Opaque :
+		alpha_1bit ? ImageOpacity::Alpha_1Bit :
+		ImageOpacity::Alpha_8Bit;
+	} else {
+		assert(false);
+	}
 }
 
 void Bitmap::CheckPixels(uint32_t flags) {
@@ -419,7 +502,7 @@ Rect Bitmap::TransformRectangle(const Transform& xform, const Rect& rect) {
 	return Rect(bounds.x1, bounds.y1, bounds.x2 - bounds.x1, bounds.y2 - bounds.y1);
 }
 
-static constexpr std::array<std::pair<int,pixman_format_code_t>, 27> formats_map = {{
+static constexpr std::array<std::pair<int,pixman_format_code_t>, 28> formats_map = {{
 		{ DynamicFormat(32,8,24,8,16,8,8,8,0,PF::Alpha).code_alpha(), PIXMAN_r8g8b8a8 },
 		{ DynamicFormat(32,8,24,8,16,8,8,8,0,PF::NoAlpha).code_alpha(), PIXMAN_r8g8b8x8 },
 
@@ -441,6 +524,7 @@ static constexpr std::array<std::pair<int,pixman_format_code_t>, 27> formats_map
 
 		{ DynamicFormat(16,5,11,6,5,5,0,0,0,PF::NoAlpha).code_alpha(), PIXMAN_r5g6b5 },
 		{ DynamicFormat(16,5,0,6,5,5,11,0,0,PF::NoAlpha).code_alpha(), PIXMAN_b5g6r5 },
+		{ DynamicFormat(16,5,0,6,5,5,11,0,0,PF::Alpha).code_alpha(), PIXMAN_b5g6r5 },
 		{ DynamicFormat(16,5,10,5,5,5,0,1,15,PF::Alpha).code_alpha(), PIXMAN_a1r5g5b5 },
 		{ DynamicFormat(16,5,10,5,5,5,0,0,0,PF::NoAlpha).code_alpha(), PIXMAN_x1r5g5b5 },
 		{ DynamicFormat(16,5,0,5,5,5,10,1,15,PF::Alpha).code_alpha(), PIXMAN_a1b5g5r5 },
@@ -477,6 +561,13 @@ DynamicFormat Bitmap::image_format;
 DynamicFormat Bitmap::opaque_image_format;
 
 void Bitmap::SetFormat(const DynamicFormat& format) {
+	Output::Debug("Setting format to DynamicFormat({}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+		format.bits,
+		format.r.bits, format.r.shift,
+		format.g.bits, format.g.shift,
+		format.b.bits, format.b.shift,
+		format.a.bits, format.a.shift,
+		format.alpha_type == PF::Alpha ? "PF::Alpha" : "PF::NoAlpha");
 	pixel_format = format;
 	opaque_pixel_format = format;
 	opaque_pixel_format.alpha_type = PF::NoAlpha;
@@ -843,15 +934,34 @@ static constexpr HardLightTable make_hard_light_lookup() {
 
 constexpr auto hard_light = make_hard_light_lookup();
 
+static inline uint16_t rgb8_to_rgb565(uint8_t r8, uint8_t g8, uint8_t b8) {
+    uint8_t r5 = r8 >> 3;
+    uint8_t g6 = g8 >> 2;
+    uint8_t b5 = b8 >> 3;
+    return (r5 << 11) | (g6 << 5) | b5;
+}
+
+static inline void rgb565_to_rgb8(uint16_t rgb565, uint8_t& r8, uint8_t& g8, uint8_t& b8) {
+    uint8_t r5 = (rgb565 >> 11) & 0x1F;
+    uint8_t g6 = (rgb565 >> 5) & 0x3F;
+    uint8_t b5 = rgb565 & 0x1F;
+
+    // Expand to 8-bit by replicating high bits into low bits
+    r8 = (r5 << 3) | (r5 >> 2);
+    g8 = (g6 << 2) | (g6 >> 4);
+    b8 = (b5 << 3) | (b5 >> 2);
+}
 
 // Saturation Tone Inline: Changes a pixel saturation
-static inline void saturation_tone(uint32_t &src_pixel, const int saturation, const int rs, const int gs, const int bs, const int as) {
+template <typename pixel_t>
+static inline void saturation_tone(pixel_t& pixel, const int saturation, DynamicFormat const& format) {
 	// Algorithm from OpenPDN (MIT license)
 	// Transformation in Y'CbCr color space
-	uint8_t r = (src_pixel >> rs) & 0xFF;
-	uint8_t g = (src_pixel >> gs) & 0xFF;
-	uint8_t b = (src_pixel >> bs) & 0xFF;
-	uint8_t a = (src_pixel >> as) & 0xFF;
+	uint8_t r, g, b, a;
+	format.uint32_to_rgba((uint32_t)pixel, r, g, b, a);
+
+	// uint16_t pix16 = rgb8_to_rgb565(r, g, b);
+	// rgb565_to_rgb8(pix16, r, g, b);
 
 	// Y' = 0.299 R' + 0.587 G' + 0.114 B'
 	uint8_t lum = (7471 * b + 38470 * g + 19595 * r) >> 16;
@@ -864,23 +974,44 @@ static inline void saturation_tone(uint32_t &src_pixel, const int saturation, co
 	int blue = ((lum * 1024 + (b - lum) * saturation) >> 10);
 	blue = blue > 255 ? 255 : blue < 0 ? 0 : blue;
 
-	src_pixel = ((uint32_t)red << rs) | ((uint32_t)green << gs) | ((uint32_t)blue << bs) | ((uint32_t)a << as);
+	uint16_t pix16 = rgb8_to_rgb565(red, green, blue);
+	rgb565_to_rgb8(pix16, r, g, b);
+
+	// src_pixel = ((uint32_t)red << rs) | ((uint32_t)green << gs) | ((uint32_t)blue << bs) | ((uint32_t)a << as);
+	pixel = (pixel_t)format.rgba_to_uint32_t(r, g, b, a);
 }
 
 // Color Tone Inline: Changes color of a pixel by hard light table
-static inline void color_tone(uint32_t &src_pixel, const Tone& tone, const int rs, const int gs, const int bs, const int as) {
-	src_pixel = ((uint32_t)hard_light.table[tone.red][(src_pixel >> rs) & 0xFF] << rs)
-		| ((uint32_t)hard_light.table[tone.green][(src_pixel >> gs) & 0xFF] << gs)
-		| ((uint32_t)hard_light.table[tone.blue][(src_pixel >> bs) & 0xFF] << bs)
-		| ((uint32_t)((src_pixel >> as) & 0xFF) << as);
+template <typename pixel_t>
+static inline void color_tone(pixel_t& pixel, const Tone& tone, DynamicFormat const& format) {
+	uint8_t r, g, b, a;
+	format.uint32_to_rgba((uint32_t)pixel, r, g, b, a);
+	pixel = (pixel_t)format.rgba_to_uint32_t(
+		hard_light.table[tone.red][r],
+		hard_light.table[tone.green][g],
+		hard_light.table[tone.blue][b],
+		a
+	);
+	// src_pixel = ((uint32_t)hard_light.table[tone.red][(src_pixel >> rs) & 0xFF] << rs)
+	// 	| ((uint32_t)hard_light.table[tone.green][(src_pixel >> gs) & 0xFF] << gs)
+	// 	| ((uint32_t)hard_light.table[tone.blue][(src_pixel >> bs) & 0xFF] << bs)
+	// 	| ((uint32_t)((src_pixel >> as) & 0xFF) << as);
 }
 
-static inline void color_tone_alpha(uint32_t &src_pixel, const Tone& tone, const int rs, const int gs, const int bs, const int as) {
-	uint8_t a = (src_pixel >> as) & 0xFF;
-	uint8_t r = ((uint32_t)hard_light.table[tone.red][(src_pixel >> rs) & 0xFF]) * a / 255;
-	uint8_t g = ((uint32_t)hard_light.table[tone.green][(src_pixel >> gs) & 0xFF]) * a / 255;
-	uint8_t b = ((uint32_t)hard_light.table[tone.blue][(src_pixel >> bs) & 0xFF]) * a / 255;
-	src_pixel = ((uint32_t)r << rs) | ((uint32_t)g << gs) | ((uint32_t)b << bs) | ((uint32_t)a << as);
+template <typename pixel_t>
+static inline void color_tone_alpha(pixel_t& pixel, const Tone& tone, DynamicFormat const& format) {
+	uint8_t r, g, b, a;
+	format.uint32_to_rgba((uint32_t)pixel, r, g, b, a);
+	pixel = (pixel_t)format.rgba_to_uint32_t(
+		(uint32_t)hard_light.table[tone.red][r] * a / 255,
+		(uint32_t)hard_light.table[tone.green][g] * a / 255,
+		(uint32_t)hard_light.table[tone.blue][b] * a / 255,
+		a
+	);
+	// uint8_t r = ((uint32_t)hard_light.table[tone.red][(src_pixel >> rs) & 0xFF]) * a / 255;
+	// uint8_t g = ((uint32_t)hard_light.table[tone.green][(src_pixel >> gs) & 0xFF]) * a / 255;
+	// uint8_t b = ((uint32_t)hard_light.table[tone.blue][(src_pixel >> bs) & 0xFF]) * a / 255;
+	// src_pixel = ((uint32_t)r << rs) | ((uint32_t)g << gs) | ((uint32_t)b << bs) | ((uint32_t)a << as);
 }
 
 void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, const Tone &tone, Opacity const& opacity) {
@@ -921,13 +1052,30 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 		src_rect.width, src_rect.height);
 	}
 
-	const int as = pixel_format.a.shift;
-	const int rs = pixel_format.r.shift;
-	const int gs = pixel_format.g.shift;
-	const int bs = pixel_format.b.shift;
-	int next_row = pitch() / sizeof(uint32_t);
-	uint32_t* pixels = (uint32_t*)this->pixels();
+	switch (format.bits) {
+	case 16:
+		Bitmap::ToneBlitImpl(x, y, (uint16_t*)pixels(), src_rect, tone, src);
+		break;
+	case 32:
+		Bitmap::ToneBlitImpl(x, y, (uint32_t*)pixels(), src_rect, tone, src);
+		break;
+	default:
+		assert(false);
+	}
+}
+
+#define ENTRY(X) {(X), #X}
+std::map<pixman_format_code_t, std::string_view> Bitmap::format_repr {
+	ENTRY(PIXMAN_r5g6b5),
+	ENTRY(PIXMAN_r8g8b8a8),
+};
+#undef ENTRY
+
+template <typename pixel_t>
+void Bitmap::ToneBlitImpl(int x, int y, pixel_t* pixels, Rect const& src_rect, const Tone& tone, const Bitmap& src) {
+	int next_row = pitch() / sizeof(pixel_t);
 	pixels = pixels + (y - 1) * next_row + x;
+	auto src_opacity = src.GetImageOpacity();
 
 	const uint16_t limit_height = std::min<uint16_t>(src_rect.height, height());
 	const uint16_t limit_width = std::min<uint16_t>(src_rect.width, width());
@@ -943,33 +1091,34 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					saturation_tone(pixels[j], sat, rs, gs, bs, as);
-					color_tone(pixels[j], tone, rs, gs, bs, as);
+					saturation_tone(pixels[j], sat, format);
+					color_tone(pixels[j], tone, format);
 				}
 			}
 		} else if (src_opacity == ImageOpacity::Alpha_1Bit) {
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					uint8_t a = (uint8_t)((pixels[j] >> as) & 0xFF);
-					if (a == 0)
-						continue;
+					uint8_t a = format.a.unpack(pixels[j]);
+					if (a == 0) {
+						if (GetTransparent()) continue;
+					}
 
-					saturation_tone(pixels[j], sat, rs, gs, bs, as);
-					color_tone(pixels[j], tone, rs, gs, bs, as);
+					saturation_tone(pixels[j], sat, format);
+					color_tone(pixels[j], tone, format);
 				}
 			}
 		} else { // 8 Bit Alpha
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					uint8_t a = (uint8_t)((pixels[j] >> as) & 0xFF);
+					uint8_t a = format.a.unpack(pixels[j]);
 					if (a == 0) {
-						continue;
+						if (GetTransparent()) continue;
 					}
 
-					saturation_tone(pixels[j], sat, rs, gs, bs, as);
-					color_tone_alpha(pixels[j], tone, rs, gs, bs, as);
+					saturation_tone(pixels[j], sat, format);
+					color_tone_alpha(pixels[j], tone, format);
 				}
 			}
 		}
@@ -983,18 +1132,19 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					saturation_tone(pixels[j], sat, rs, gs, bs, as);
+					saturation_tone(pixels[j], sat, format);
 				}
 			}
 		} else { // Any kind of alpha
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					uint8_t a = (uint8_t)((pixels[j] >> as) & 0xFF);
-					if (a == 0)
-						continue;
+					uint8_t a = format.a.unpack(pixels[j]);
+					if (a == 0) {
+						if (GetTransparent()) continue;
+					}
 
-					saturation_tone(pixels[j], sat, rs, gs, bs, as);
+					saturation_tone(pixels[j], sat, format);
 				}
 			}
 		}
@@ -1006,31 +1156,32 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					color_tone(pixels[j], tone, rs, gs, bs, as);
+					color_tone(pixels[j], tone, format);
 				}
 			}
 		} else if (src_opacity == ImageOpacity::Alpha_1Bit) {
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					uint8_t a = (uint8_t)((pixels[j] >> as) & 0xFF);
-					if (a == 0)
+					uint8_t a = format.a.unpack(pixels[j]);
+					if (a == 0 && GetTransparent())
 						continue;
 
-					color_tone(pixels[j], tone, rs, gs, bs, as);
+					color_tone(pixels[j], tone, format);
 				}
 			}
 		} else { // 8 Bit Alpha
 			for (uint16_t i = 0; i < limit_height; ++i) {
 				pixels += next_row;
 				for (uint16_t j = 0; j < limit_width; ++j) {
-					uint8_t a = (uint8_t)((pixels[j] >> as) & 0xFF);
-					if (a == 0)
-						continue;
-					else if (a == 255) {
-						color_tone(pixels[j], tone, rs, gs, bs, as);
+					uint8_t a = format.a.unpack(pixels[j]);
+					if (a == 0) {
+						if (GetTransparent()) continue;
+					}
+					if (a == 255) {
+						color_tone(pixels[j], tone, format);
 					} else {
-						color_tone_alpha(pixels[j], tone, rs, gs, bs, as);
+						color_tone_alpha(pixels[j], tone, format);
 					}
 				}
 			}
@@ -1332,4 +1483,3 @@ void Bitmap::EdgeMirrorBlit(int x, int y, Bitmap const& src, Rect const& src_rec
 		draw(x - dst_rect.width, y - dst_rect.height);
 	}
 }
-

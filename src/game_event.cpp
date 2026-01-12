@@ -618,4 +618,3 @@ const lcf::rpg::EventPage* Game_Event::GetPage(int page) const {
 const lcf::rpg::EventPage *Game_Event::GetActivePage() const {
 	return page;
 }
-

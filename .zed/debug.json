@@ -1,0 +1,18 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+	{
+		"label": "linux-debug",
+		"request": "launch",
+		"adapter": "CodeLLDB",
+		"program": "build/linux-debug/easyrpg-player",
+		"cwd": "~/dev/easyrpg-testbench",
+		"args": ["--test-play"],
+		"build": {
+			"command": "cmake",
+			"args": ["--build", "--preset=linux-debug"]
+		}
+	}
+]

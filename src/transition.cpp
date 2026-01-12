@@ -192,7 +192,8 @@ void Transition::Draw(Bitmap& dst) {
 	std::vector<int> z_pos(2), z_size(2), z_length(2);
 	int z_min, z_max, z_percent, z_fixed_pos, z_fixed_size;
 	uint8_t m_r, m_g, m_b, m_a;
-	uint32_t *m_pointer, blocks_to_print;
+	void *m_pointer;
+	uint32_t blocks_to_print;
 	int m_size;
 
 	BitmapRef screen_pointer1, screen_pointer2;
@@ -382,17 +383,37 @@ void Transition::Draw(Bitmap& dst) {
 		// in this case the nearest pixel of the image is choosen (edge handling = extend)
 		int off = (m_size / 2);
 
-		for (int row = 0; row < h + rand; ++row) {
-			int src_row = std::clamp(((row + off) / m_size) * m_size - off, 0, h - 1);
+		switch (dst.pixel_format.bits) {
+		case 16: {
+			for (int row = 0; row < h + rand; ++row) {
+				int src_row = std::clamp(((row + off) / m_size) * m_size - off, 0, h - 1);
 
-			for (int col = 0; col < w + rand; ++col) {
-				int src_col = std::clamp(((col + off) / m_size) * m_size - off, 0, w - 1);
-				m_pointer = static_cast<uint32_t*>(screen_pointer1->pixels()) + src_row * w + src_col;
-				dst.pixel_format.uint32_to_rgba(*m_pointer, m_r, m_g, m_b, m_a);
+				for (int col = 0; col < w + rand; ++col) {
+					int src_col = std::clamp(((col + off) / m_size) * m_size - off, 0, w - 1);
+					m_pointer = static_cast<uint16_t*>(screen_pointer1->pixels()) + src_row * w + src_col;
+					dst.pixel_format.uint32_to_rgba(*(uint16_t*)m_pointer, m_r, m_g, m_b, m_a);
 
-				Rect r(col - rand, row - rand, 1, 1);
-				dst.FillRect(r, Color(m_r, m_g, m_b, 255));
+					Rect r(col - rand, row - rand, 1, 1);
+					dst.FillRect(r, Color(m_r, m_g, m_b, 255));
+				}
 			}
+			break;
+		}
+		case 32: {
+			for (int row = 0; row < h + rand; ++row) {
+				int src_row = std::clamp(((row + off) / m_size) * m_size - off, 0, h - 1);
+
+				for (int col = 0; col < w + rand; ++col) {
+					int src_col = std::clamp(((col + off) / m_size) * m_size - off, 0, w - 1);
+					m_pointer = static_cast<uint32_t*>(screen_pointer1->pixels()) + src_row * w + src_col;
+					dst.pixel_format.uint32_to_rgba(*(uint32_t*)m_pointer, m_r, m_g, m_b, m_a);
+
+					Rect r(col - rand, row - rand, 1, 1);
+					dst.FillRect(r, Color(m_r, m_g, m_b, 255));
+				}
+			}
+			break;
+		}
 		}
 		break;
 	}
@@ -468,4 +489,3 @@ void Transition::Update() {
 	//Update current_frame:
 	current_frame++;
 }
-

@@ -182,7 +182,7 @@ public:
 		_r = r.unpack(pix);
 		_g = g.unpack(pix);
 		_b = b.unpack(pix);
-		_a = a.unpack(pix);
+		_a = a.bits ? a.unpack(pix) : 255;
 	}
 
 	constexpr uint32_t rgba_to_uint32_t(const uint8_t& _r, const uint8_t& _g, const uint8_t& _b, const uint8_t& _a) const {
@@ -668,6 +668,13 @@ typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::IsAligne
 typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::IsAligned,8,0,8,8,8,16,8,24> format_R8G8B8A8_n;
 typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::IsAligned,8,24,8,16,8,8,8,0> format_A8B8G8R8_n;
 typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::IsAligned,8,8,8,16,8,24,8,0> format_A8R8G8B8_n;
+
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::NotAligned,5,0,6,5,5,11,0,0> format_R5G6B5;
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::NotAligned,5,11,6,5,5,0,0,0> format_B5G6R5;
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::Alpha,PF::NotAligned,5,0,5,5,5,10,1,15> format_R5G5B5A1_a;
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::NotAligned,5,0,5,5,5,10,1,15> format_R5G5B5A1_n;
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::Alpha,PF::NotAligned,5,10,5,5,5,0,1,15> format_B5G5R5A1_a;
+typedef PixelFormatT<16,PF::StaticMasks,PF::StaticAlpha,PF::NoAlpha,PF::NotAligned,5,10,5,5,5,0,1,15> format_B5G5R51_n;
 #else
 typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::Alpha,PF::IsAligned,8,8,8,16,8,24,8,0> format_B8G8R8A8_a;
 typedef PixelFormatT<32,PF::StaticMasks,PF::StaticAlpha,PF::Alpha,PF::IsAligned,8,24,8,16,8,8,8,0> format_R8G8B8A8_a;

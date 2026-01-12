@@ -134,8 +134,8 @@ void Sprite_Picture::Draw(Bitmap& dst) {
 	SetWaverDepth(data.effect_mode == lcf::rpg::SavePicture::Effect_wave ? data.current_effect_power * 2 : 0);
 
 	// Only older versions of RPG_RT apply the effects of current_bot_trans chunk.
-	const auto top_trans = data.current_top_trans;
-	const auto bottom_trans = feature_bottom_trans ? data.current_bot_trans : top_trans;
+	auto top_trans = data.current_top_trans;
+	auto bottom_trans = feature_bottom_trans ? data.current_bot_trans : top_trans;
 
 	SetOpacity(
 		(int)(255 * (100 - top_trans) / 100),
